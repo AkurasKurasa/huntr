@@ -1,0 +1,26 @@
+# Render Blueprint for the Huntr API (Express).
+# Render dashboard -> New -> Blueprint -> pick this repo. Fill in the secret values when asked.
+services:
+  - type: web
+    name: huntr-api
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install --no-audit --no-fund
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: CLIENT_ORIGIN
+        value: https://akuraskurasa.github.io
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false

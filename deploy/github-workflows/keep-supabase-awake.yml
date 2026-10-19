@@ -1,0 +1,56 @@
+name: Keep Supabase awake
+
+# Free Supabase projects pause after about a week without activity.
+# Every 3 days this signs in as a "bot" Huntr account and reads its profile,
+# which is real auth + database activity, so the project never goes idle.
+#
+# Needs (repo Settings -> Secrets and variables -> Actions):
+#   Variables: VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY
+#   Secrets:   HUNTR_BOT_EMAIL, HUNTR_BOT_PASSWORD
+on:
+  schedule:
+    - cron: '0 1 */3 * *'   # 01:00 UTC every 3 days (09:00 in Manila)
+  workflow_dispatch:         # lets you run it by hand from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+      ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+      BOT_EMAIL: ${{ secrets.HUNTR_BOT_EMAIL }}
+      BOT_PASSWORD: ${{ secrets.HUNTR_BOT_PASSWORD }}
+    steps:
+      - name: Check settings
+        run: |
+          for v in SUPABASE_URL ANON_KEY BOT_EMAIL BOT_PASSWORD; do
+            if [ -z "${!v}" ]; then echo "::error::$v is not set — see the comments at the top of this workflow"; exit 1; fi
+          done
+
+      - name: Sign in as the bot account
+        id: login
+        run: |
+          body=$(jq -n --arg e "$BOT_EMAIL" --arg p "$BOT_PASSWORD" '{email: $e, password: $p}')
+          res=$(curl -sS -X POST "$SUPABASE_URL/auth/v1/token?grant_type=password" \
+            -H "apikey: $ANON_KEY" -H "Content-Type: application/json" -d "$body")
+          token=$(echo "$res" | jq -r '.access_token // empty')
+          if [ -z "$token" ]; then
+            echo "::error::Sign-in failed: $(echo "$res" | jq -r '.error_description // .msg // .error // "unknown error"')"
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+          echo "Signed in as the bot account."
+
+      - name: Read the bot's profile
+        run: |
+          code=$(curl -sS -o profile.json -w "%{http_code}" "$SUPABASE_URL/rest/v1/profiles?select=id,updated_at&limit=1" \
+            -H "apikey: $ANON_KEY" -H "Authorization: Bearer ${{ steps.login.outputs.token }}")
+          if [ "$code" != "200" ]; then echo "::error::Database read failed (HTTP $code)"; cat profile.json; exit 1; fi
+          echo "Database answered — Supabase stays awake."
+
+      - name: Sign out
+        if: always() && steps.login.outputs.token != ''
+        run: |
+          curl -sS -o /dev/null -X POST "$SUPABASE_URL/auth/v1/logout" \
+            -H "apikey: $ANON_KEY" -H "Authorization: Bearer ${{ steps.login.outputs.token }}" || true

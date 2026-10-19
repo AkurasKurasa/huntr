@@ -1,0 +1,16 @@
+{
+  "name": "huntr",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Paste job links \u2014 Huntr reads each post, drafts the email or cover letter, sends it from your Gmail and tracks the replies.",
+  "scripts": {
+    "install:all": "npm install && npm install --prefix server && npm install --prefix client",
+    "dev": "concurrently -n api,web -c magenta,cyan \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
+    "build": "npm run build --prefix client",
+    "test": "npm test --prefix server",
+    "setup:bot": "npm run bot --prefix server"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  }
+}
