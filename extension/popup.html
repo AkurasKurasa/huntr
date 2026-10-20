@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Huntr</title>
+<style>
+  body { margin: 0; width: 300px; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; color: #1B1440; background: #F6F4FD; }
+  header { display: flex; align-items: center; gap: 8px; padding: 12px 14px; background: #4B2FD6; color: #fff; font-weight: 700; font-size: 16px; }
+  main { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+  .card { background: #fff; border: 1px solid #E4E0F5; border-radius: 12px; padding: 12px; }
+  label { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; font-weight: 600; }
+  input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: #5B3DF5; }
+  .muted { color: #5E5878; font-size: 13px; margin: 6px 0 0 26px; font-weight: 400; }
+  .warn { color: #8A6200; }
+  #status { color: #3D3760; }
+  button { font: inherit; font-weight: 600; border: 1px solid #DCD7F0; background: #fff; color: #1B1440; border-radius: 9px; padding: 8px 12px; cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="5" r="2.8" fill="#FF7A59" stroke="none"/><path d="M5 21v-5a4 4 0 0 1 8 0v5"/><path d="M9 12v-1a4 4 0 0 1 8 0"/><path d="M17 21V3"/><path d="M15.2 5.6 17 3l1.8 2.6" stroke="#FF7A59"/></svg>
+  huntr
+</header>
+<main>
+  <div class="card" id="access" style="display:none;border-color:#F5E2B0;background:#FFF8E6">
+    <strong>Huntr can't reach its sites yet.</strong>
+    <p class="muted" style="margin:6px 0 10px">Allow access so the Send button works.</p>
+    <button type="button" id="allow" style="background:#5B3DF5;color:#fff;border:0">Allow access</button>
+  </div>
+  <div class="card" id="status">Nothing in progress.</div>
+  <div class="card">
+    <label><input type="checkbox" id="auto"> Send in the background</label>
+    <p class="muted">On: Huntr fills and sends each application in a background tab and closes it when it's sent. You stay on Huntr. A tab only comes forward if you need to log in or solve a captcha.<br>Off: each job opens in front and you press Send yourself.</p>
+    <p class="muted warn">Job sites' rules discourage automated applying and can restrict accounts that send many quickly. Huntr sends one at a time with pauses, but keep batches small.</p>
+  </div>
+  <button type="button" id="cancel">Stop all queued applications</button>
+</main>
+<script src="popup.js"></script>
+</body>
+</html>

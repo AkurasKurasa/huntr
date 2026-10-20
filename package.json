@@ -8,7 +8,8 @@
     "dev": "concurrently -n api,web -c magenta,cyan \"npm run dev --prefix server\" \"npm run dev --prefix client\"",
     "build": "npm run build --prefix client",
     "test": "npm test --prefix server",
-    "setup:bot": "npm run bot --prefix server"
+    "setup:bot": "npm run bot --prefix server",
+    "pack:extension": "node scripts/pack-extension.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

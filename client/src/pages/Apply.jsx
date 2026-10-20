@@ -7,8 +7,16 @@ import AuthPrompt from '../components/AuthPrompt.jsx';
 import { useAuth } from '../context/AuthContext.jsx';
 import { api } from '../lib/api.js';
 import { signInWithGoogle } from '../lib/supabase.js';
+import { useHuntrExtension, extensionSiteFor, extensionSiteForUrl, EXT_STATUS } from '../lib/extension.js';
+import QuestionsPrompt from '../components/QuestionsPrompt.jsx';
 
 const PENDING_KEY = 'huntr:pendingLinks';
+// Sites Huntr is tuned for first. Logos are each site's own favicon, loaded from the site.
+const SUPPORTED_SITES = [
+  { name: 'OnlineJobs.ph', domain: 'onlinejobs.ph', url: 'https://www.onlinejobs.ph' },
+  { name: 'Indeed', domain: 'indeed.com', url: 'https://www.indeed.com' },
+  { name: 'JobStreet', domain: 'jobstreet.com', url: 'https://www.jobstreet.com' }
+];
 const TONES = [['formal', 'Formal'], ['friendly', 'Friendly'], ['concise', 'Concise']];
 
 const hostOf = (u) => {
@@ -39,8 +47,10 @@ function stepsFor(app) {
   return [
     `Opened ${host} and read the job post`,
     `Found the application page at ${hostOf(app.apply_url || app.source_url)}`,
-    'No email instructions to follow — this one is applied on site',
-    `Prepared your ${(app.needs || []).join(', ')}`
+    app.needs?.includes('site login')
+      ? `This site only lets signed-in members apply — log in to ${host} first`
+      : 'No email instructions to follow — this one is applied on site',
+    `Prepared your ${(app.needs || []).filter((n) => n !== 'site login').join(', ')}`
   ];
 }
 
@@ -64,6 +74,26 @@ export default function Apply() {
   const [error, setError] = useState('');
   const [copied, setCopied] = useState(false);
   const [checks, setChecks] = useState({});
+  const [profileThin, setProfileThin] = useState(false);
+  const [answers, setAnswers] = useState({}); // saved answers to employer questions
+  const [asking, setAsking] = useState(null); // { id, questions } — a job site is waiting on your answers
+  const [askLater, setAskLater] = useState(false);
+  // Live progress from the Huntr browser extension, per application id
+  const [extStatus, setExtStatus] = useState({});
+  const ext = useHuntrExtension(async ({ id, status, detail, questions }) => {
+    setExtStatus((m) => (m[id]?.status === 'submitted' ? m : { ...m, [id]: { status, detail, questions: status === 'questions' ? questions : null } }));
+    if (status === 'questions' && questions?.length) {
+      setAsking({ id, questions });
+      setAskLater(false);
+    } else setAsking((a) => (a?.id === id ? null : a));
+    if (status === 'submitted') {
+      try {
+        replace((await api(`/applications/${id}/submitted`, { method: 'POST' })).application);
+      } catch (e) {
+        setError(e.message);
+      }
+    }
+  });
 
   // Signed-in only: load saved drafts + Gmail status. Guests just see the empty page.
   useEffect(() => {
@@ -78,6 +108,10 @@ export default function Apply() {
       })
       .catch((e) => setError(e.message));
     api('/gmail/status').then(setGmail).catch(() => setGmail({ configured: false, connected: false }));
+    api('/profile').then(({ profile }) => {
+      setProfileThin(!profile?.headline && !(profile?.skills || []).length && !profile?.highlight);
+      setAnswers(profile?.answers || {});
+    }).catch(() => {});
   }, [session]);
 
   // Links a guest typed before signing in: put them back and analyze them right away.
@@ -117,6 +151,11 @@ export default function Apply() {
   const sel = items.find((a) => a.id === selId) || items[0];
   const emailDrafts = items.filter((a) => a.method === 'email' && a.status === 'draft');
   const siteDrafts = items.filter((a) => a.method === 'site' && a.status === 'draft');
+  const extDrafts = siteDrafts.filter((a) => extensionSiteFor(a));
+  const otherSiteDrafts = siteDrafts.filter((a) => !extensionSiteFor(a));
+  const autoEmails = gmail.connected ? emailDrafts : [];
+  const autoExt = ext.installed ? extDrafts.filter((a) => !['queued', 'opening', 'applying', 'filled', 'submitting', 'verifying', 'needs-login', 'questions'].includes(extStatus[a.id]?.status)) : [];
+  const autoCount = autoEmails.length + autoExt.length;
   const counts = useMemo(() => ({ email: items.filter((a) => a.method === 'email').length, site: items.filter((a) => a.method === 'site').length }), [items]);
 
   const replace = (app) => setItems((list) => list.map((a) => (a.id === app.id ? app : a)));
@@ -129,7 +168,24 @@ export default function Apply() {
     setError('');
     setFailures([]);
     try {
-      const { results } = await api('/jobs/analyze', { method: 'POST', body: { links: list, tone: sel?.tone || 'formal' } });
+      const tone = sel?.tone || 'formal';
+      let { results } = await api('/jobs/analyze', { method: 'POST', body: { links: list, tone } });
+      // Some job sites (JobStreet) refuse Huntr's server. Read those pages in your own browser through the extension instead.
+      const blocked = results.filter((r) => !r.ok && /HTTP (403|429|503)|blocked|forbidden/i.test(r.error || '') && extensionSiteForUrl(r.link));
+      if (blocked.length && ext.installed) {
+        const pages = [];
+        for (const r of blocked) {
+          const page = await ext.readPage(r.link);
+          if (page.ok) pages.push({ url: r.link, html: page.html, finalUrl: page.finalUrl });
+          else r.error = `${extensionSiteForUrl(r.link).name}: ${page.error}`;
+        }
+        if (pages.length) {
+          const again = (await api('/jobs/analyze', { method: 'POST', body: { links: [], pages, tone } })).results;
+          results = results.map((r) => again.find((a) => (a.application?.source_url || a.link) === r.link) || r);
+        }
+      } else if (blocked.length) {
+        for (const r of blocked) r.error = `${extensionSiteForUrl(r.link).name} blocks Huntr's server — install the Huntr extension (Setup) and Huntr will read it through your browser.`;
+      }
       const ok = results.filter((r) => r.ok).map((r) => r.application);
       setFailures(results.filter((r) => !r.ok));
       setItems((list) => [...ok, ...list]);
@@ -174,6 +230,57 @@ export default function Apply() {
     }
   }
 
+  /** Stops a send while the draft still has an employer's question waiting for your answer. */
+  function checkReady(app) {
+    if (/\[Answer needed:/.test(app.body || '')) {
+      setSelId(app.id);
+      setError(`“${app.title}”: the employer asked a question — replace the “[Answer needed: …]” part of the draft with your answer, then press Send.`);
+      return false;
+    }
+    return true;
+  }
+
+  function sendViaExtension(app) {
+    if (!checkReady(app)) return;
+    if (!ext.installed) {
+      const firefox = /firefox/i.test(navigator.userAgent);
+      setError(firefox
+        ? 'Huntr can’t reach its extension. Click the Huntr icon in Firefox’s toolbar and press “Allow access” (or open about:addons → Huntr → Permissions and switch on all sites), then reload this page. Not installed yet? Go to Setup.'
+        : 'Huntr can’t reach its extension. Install it from Setup, then reload this page.');
+      return;
+    }
+    setError('');
+    ext.send([app], answers);
+  }
+
+  /** Everything Huntr can send for you: emails through Gmail, OnlineJobs.ph and JobStreet through the extension. */
+  async function sendAll() {
+    const ready = (a) => !/\[Answer needed:/.test(a.body || '');
+    const blocked = [...autoExt, ...autoEmails].filter((a) => !ready(a));
+    if (blocked.length) setError(`${blocked.length} draft${blocked.length === 1 ? '' : 's'} still need${blocked.length === 1 ? 's' : ''} your answer to the employer's question (marked “Answer needed”) — ${blocked.length === 1 ? 'it was' : 'they were'} skipped.`);
+    const extReady = autoExt.filter(ready);
+    const emailReady = autoEmails.filter(ready);
+    if (extReady.length) ext.send(extReady, answers);
+    if (emailReady.length) await send(emailReady.map((a) => a.id));
+  }
+
+  /** You answered the employer's questions in Huntr: send them to the tab, and remember them if asked. */
+  async function answerQuestions(values, remember) {
+    const { id, questions } = asking;
+    ext.answer(id, values);
+    setAsking(null);
+    setExtStatus((m) => ({ ...m, [id]: { status: 'applying', detail: 'Filling in your answers…' } }));
+    if (!remember) return;
+    const next = { ...answers };
+    for (const q of questions) if (values[q.key] != null) next[q.label] = values[q.key];
+    setAnswers(next);
+    try {
+      await api('/profile', { method: 'PUT', body: { answers: next } });
+    } catch (e) {
+      setError(/answers/.test(e.message) ? 'Couldn’t remember your answers — run supabase/004_screening_answers.sql in the Supabase SQL Editor.' : e.message);
+    }
+  }
+
   async function markSubmitted(id) {
     try {
       replace((await api(`/applications/${id}/submitted`, { method: 'POST' })).application);
@@ -200,7 +307,8 @@ export default function Apply() {
   }
 
   const checklist = sel?.method === 'site'
-    ? ['Resume uploaded', 'Cover letter filled in']
+    ? (sel.needs?.includes('site login') ? [`Logged in to ${hostOf(sel.source_url)}`] : [])
+        .concat(['Resume uploaded', 'Cover letter filled in'])
         .concat(sel.needs?.includes('screening') ? ['Screening questions answered'] : [])
         .concat(sel.needs?.includes('portfolio') ? ['Portfolio link added'] : [])
     : [];
@@ -285,10 +393,23 @@ export default function Apply() {
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
             </button>
           </div>
+          <div className="supported">
+            <span className="supported__label">Supported websites</span>
+            {SUPPORTED_SITES.map((site) => (
+              <a key={site.domain} className="supported__site" href={site.url} target="_blank" rel="noreferrer">
+                <img src={`https://www.google.com/s2/favicons?domain=${site.domain}&sz=64`} alt="" width="16" height="16" loading="lazy" />
+                {site.name}
+              </a>
+            ))}
+            <span className="supported__note">Other sites work too — results may vary.</span>
+          </div>
           {analyzing && <div className="progress" aria-label="Analyzing"><div /></div>}
         </section>
 
         {error && <div className="alert" role="alert">{error}</div>}
+        {session && profileThin && items.length > 0 && (
+          <div className="strip"><span className="strip__text">Drafts are only as good as your Profile. Add a headline, your skills and a project you're proud of in <Link to="/profile" style={{ color: 'var(--violet)', fontWeight: 600 }}>Profile</Link>, then pick a tone again to redraft.</span></div>
+        )}
         {failures.length > 0 && (
           <div className="alert" role="status">
             Couldn't read {failures.length === 1 ? 'one link' : `${failures.length} links`} — they're back in the boxes above:
@@ -318,37 +439,29 @@ export default function Apply() {
           <>
             <div className="strip">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--violet)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M13 2 4 14h7l-1 8 9-12h-7z" /></svg>
-              {gmail.connected ? (
-                <>
-                  <span className="strip__text">
-                    {emailDrafts.length
-                      ? `Ready: Huntr will send ${emailDrafts.length} email${emailDrafts.length === 1 ? '' : 's'} from your Gmail.`
-                      : 'All email applications are sent.'}
-                    {siteDrafts.length ? ` ${siteDrafts.length} job${siteDrafts.length === 1 ? '' : 's'} must be applied on the company site — open each one below.` : ''}
-                  </span>
-                  <button type="button" className="btn btn--primary" disabled={!emailDrafts.length || sending} onClick={() => send(emailDrafts.map((a) => a.id))}>
-                    {sending ? 'Sending…' : `Send all ${emailDrafts.length}`}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <span className="strip__text">
-                    {gmail.configured === false
-                      ? 'Gmail sending is not set up on the server yet (see README → Google OAuth).'
-                      : 'Connect Gmail so Huntr can send these for you.'}
-                  </span>
-                  {gmail.configured !== false && (
-                    <button type="button" className="btn btn--primary" onClick={() => signInWithGoogle('/apply')}>Connect Gmail</button>
-                  )}
-                </>
+              <span className="strip__text">
+                {autoCount ? `Ready: Huntr will send ${[
+                  autoEmails.length && `${autoEmails.length} email${autoEmails.length === 1 ? '' : 's'} from your Gmail`,
+                  autoExt.length && `${autoExt.length} through the Huntr extension`
+                ].filter(Boolean).join(' and ')}.` : emailDrafts.length || extDrafts.length ? '' : 'Nothing waiting to send.'}
+                {emailDrafts.length > 0 && !gmail.connected && ` Connect Gmail to send ${emailDrafts.length} email application${emailDrafts.length === 1 ? '' : 's'}.`}
+                {extDrafts.length > 0 && !ext.installed && ` Get the Huntr extension to send ${extDrafts.length} job-site application${extDrafts.length === 1 ? '' : 's'}.`}
+                {otherSiteDrafts.length > 0 && ` ${otherSiteDrafts.length} must be applied on the company site — open each below.`}
+              </span>
+              {emailDrafts.length > 0 && !gmail.connected && gmail.configured !== false && (
+                <button type="button" className="btn btn--ghost" onClick={async () => { const r = await signInWithGoogle('/apply'); if (r?.error) setError(r.error.message); }}>Connect Gmail</button>
               )}
+              {extDrafts.length > 0 && !ext.installed && <Link to="/extension" className="btn btn--ghost">Get the extension</Link>}
+              <button type="button" className="btn btn--primary" disabled={!autoCount || sending} onClick={sendAll}>
+                {sending ? 'Sending…' : `Send all ${autoCount || ''}`.trim()}
+              </button>
             </div>
 
             <div className="results">
               <section className="job-list" aria-label="Analyzed jobs">
                 <div className="job-list__head"><span>Jobs</span><span>{counts.email} email · {counts.site} site</span></div>
                 {items.map((a) => {
-                  const st = statusOf(a);
+                  const st = (a.status === 'draft' && EXT_STATUS[extStatus[a.id]?.status]) || statusOf(a);
                   return (
                     <button type="button" key={a.id} className={`job-row ${sel?.id === a.id ? 'is-active' : ''}`} onClick={() => setSelId(a.id)}>
                       <span className="tile tile--md" aria-hidden="true">{initialOf(a.company)}</span>
@@ -431,7 +544,7 @@ export default function Apply() {
                         <button type="button" className="btn btn--text" onClick={() => remove(sel.id)}>Delete</button>
                         <button type="button" className="btn btn--ghost" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
                         {sel.status === 'draft' ? (
-                          <button type="button" className="btn btn--primary" disabled={sending || !gmail.connected} onClick={() => send([sel.id])}>Send from Gmail</button>
+                          <button type="button" className="btn btn--primary" disabled={sending} onClick={() => (gmail.connected ? (checkReady(sel) && send([sel.id])) : setError('Connect Gmail first — use the Connect Gmail button above, or Setup.'))}>Send</button>
                         ) : (
                           <span className="btn btn--ok">✓ Sent</span>
                         )}
@@ -468,14 +581,34 @@ export default function Apply() {
                       {sel.needs?.includes('screening') && (
                         <div className="note"><strong>Screening questions.</strong> They only show on the form — answer them there before submitting.</div>
                       )}
+                      {extensionSiteFor(sel) && sel.status === 'draft' && (
+                        <div className={extStatus[sel.id]?.status === 'error' ? 'alert' : 'strip'} style={{ margin: '0 18px 16px' }}>
+                          <span className="strip__text">
+                            {extStatus[sel.id]
+                              ? <><strong>{EXT_STATUS[extStatus[sel.id].status]?.text || extStatus[sel.id].status}.</strong> {extStatus[sel.id].detail}{extStatus[sel.id].status === 'questions' && extStatus[sel.id].questions && (
+                                  <> <button type="button" className="btn btn--text" style={{ color: 'var(--violet)', fontWeight: 600, padding: 0, minHeight: 0 }} onClick={() => { setAsking({ id: sel.id, questions: extStatus[sel.id].questions }); setAskLater(false); }}>Answer now</button></>
+                                )}</>
+                              : ext.installed
+                                ? ext.autoSubmit ? `Huntr sends this through ${extensionSiteFor(sel).name} in a background tab — you stay here. A tab only comes forward if you need to log in or answer the employer's questions.` : `Huntr will open this job on ${extensionSiteFor(sel).name}, fill in your message and wait for you to send it (or turn on “Send in the background” in the extension).`
+                                : <>Get the <Link to="/extension" style={{ color: 'var(--violet)', fontWeight: 600 }}>Huntr browser extension</Link> to send this from your {extensionSiteFor(sel).name} account. Until then, open the form and paste the cover letter.</>}
+                          </span>
+                        </div>
+                      )}
                       <div className="card__foot">
                         <span className="spacer" />
                         <button type="button" className="btn btn--text" onClick={() => remove(sel.id)}>Delete</button>
                         <button type="button" className="btn btn--ghost" onClick={copy}>{copied ? 'Copied' : 'Copy cover letter'}</button>
-                        {sel.status === 'draft' ? (
-                          <button type="button" className="btn btn--primary" onClick={() => markSubmitted(sel.id)}>Mark as submitted</button>
+                        {sel.status !== 'draft' ? (
+                          <span className="btn btn--ok">✓ {extensionSiteFor(sel) ? 'Sent' : 'Submitted'}</span>
+                        ) : extensionSiteFor(sel) ? (
+                          <>
+                            <button type="button" className="btn btn--ghost" onClick={() => markSubmitted(sel.id)}>Mark as sent</button>
+                            <button type="button" className="btn btn--primary" disabled={['queued', 'opening', 'applying', 'submitting', 'verifying', 'questions'].includes(extStatus[sel.id]?.status)} onClick={() => sendViaExtension(sel)}>
+                              Send
+                            </button>
+                          </>
                         ) : (
-                          <span className="btn btn--ok">✓ Submitted</span>
+                          <button type="button" className="btn btn--primary" onClick={() => markSubmitted(sel.id)}>Mark as submitted</button>
                         )}
                       </div>
                     </div>
@@ -487,6 +620,13 @@ export default function Apply() {
         )}
       </main>
       <AuthPrompt ref={authRef} reason={authReason} returnTo="/apply" />
+      <QuestionsPrompt
+        app={asking && !askLater ? items.find((a) => a.id === asking.id) : null}
+        site={asking ? extensionSiteFor(items.find((a) => a.id === asking.id))?.name : ''}
+        questions={asking?.questions}
+        onSubmit={answerQuestions}
+        onClose={() => setAskLater(true)}
+      />
     </>
   );
 }

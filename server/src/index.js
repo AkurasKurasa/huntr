@@ -16,6 +16,8 @@ const app = express();
 app.use(helmet());
 app.set('trust proxy', 1); // Render sits behind a proxy (needed for rate limiting)
 app.use(cors({ origin: config.clientOrigins, credentials: true }));
+// Job pages read by the Huntr extension come in as HTML, so the analyze route takes bigger bodies.
+app.use('/api/jobs/analyze', express.json({ limit: '6mb' }));
 app.use(express.json({ limit: '1mb' }));
 app.use('/api', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: true, legacyHeaders: false }));
 

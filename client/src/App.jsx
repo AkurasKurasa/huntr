@@ -6,6 +6,8 @@ import Auth from './pages/Auth.jsx';
 import Apply from './pages/Apply.jsx';
 import Tracker from './pages/Tracker.jsx';
 import Profile from './pages/Profile.jsx';
+import Extension from './pages/Extension.jsx';
+import BrowserNotice from './components/BrowserNotice.jsx';
 
 function Protected({ children }) {
   const { session, loading } = useAuth();
@@ -33,11 +35,13 @@ function ReturnAfterSignIn() {
 export default function App() {
   return (
     <>
+      <BrowserNotice />
       <ReturnAfterSignIn />
       <Routes>
         <Route path="/auth" element={<Auth />} />
         <Route path="/apply" element={<Apply />} />{/* public: guests can look, actions ask them to sign in */}
         <Route path="/tracker" element={<Protected><Tracker /></Protected>} />
+        <Route path="/extension" element={<Extension />} />
         <Route path="/profile" element={<Protected><Profile /></Protected>} />
         <Route path="*" element={<Navigate to="/apply" replace />} />
       </Routes>

@@ -30,8 +30,21 @@ export function takeReturnTo() {
   }
 }
 
+let googleCheck;
+/** True when the Google provider is switched on in Supabase (Authentication -> Sign In / Providers). */
+export function googleEnabled() {
+  googleCheck ||= fetch(`${url}/auth/v1/settings`, { headers: { apikey: anonKey } })
+    .then((r) => (r.ok ? r.json() : {}))
+    .then((s) => Boolean(s?.external?.google))
+    .catch(() => false);
+  return googleCheck;
+}
+
 /** Google sign-in that also asks for permission to send Gmail on the user's behalf. */
-export function signInWithGoogle(returnTo = '/apply') {
+export async function signInWithGoogle(returnTo = '/apply') {
+  if (!(await googleEnabled())) {
+    return { error: new Error('Google sign-in is not set up yet. Turn on the Google provider in Supabase (see README → Google), or use email and password for now.') };
+  }
   try {
     sessionStorage.setItem(RETURN_KEY, returnTo);
   } catch {

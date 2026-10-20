@@ -59,6 +59,28 @@ Open http://localhost:5173 (pages use `#/` URLs, e.g. `/#/tracker`), sign in wit
 
 Run the parser tests with `npm test`.
 
+## Browser extension (sending on OnlineJobs.ph)
+
+Job sites like OnlineJobs.ph only accept applications from a logged-in member, so Huntr sends those through a small Chrome extension that runs in **your** browser (you stay logged in yourself; Huntr never sees your password).
+
+- **Install:** open Huntr → **Setup** → press the button. It downloads `huntr-extension.zip`; unzip it, open `chrome://extensions`, turn on **Developer mode**, **Load unpacked** → pick the folder. The Setup page shows ✓ once it's detected.
+- **Use:** on an OnlineJobs.ph job, press **Send** (or **Send all**). The extension opens each job in a background tab, clicks Apply, fills the subject and message, presses Send and closes the tab — you stay on Huntr. A tab only comes forward if you need to log in or solve a captcha. Turn off **Send in the background** in the extension's popup to review and press Send yourself. Huntr marks it as sent when OnlineJobs.ph confirms.
+- If the post says to apply by email, Huntr sends it through Gmail instead.
+- **Changing the extension:** edit files in `extension/`, then `npm run pack:extension` to rebuild both downloads, and click the reload icon on `chrome://extensions`.
+- **One-click install:** publish the `extension/` folder on the Chrome Web Store (one-time $5 developer fee, a short review, and a privacy-policy page), then put its link in `client/.env` as `VITE_EXTENSION_STORE_URL`. Setup then opens the store's "Add to Chrome" button directly.
+
+### Firefox (recommended — free, one-click install)
+
+Huntr is built for Firefox. The `extension/` folder is the Firefox version (Firefox 142+); the packer makes the Chrome copy from it.
+
+1. `npm run pack:extension` → creates `deploy/huntr-extension-firefox-upload.zip` (Firefox) and `client/public/huntr-extension.zip` (Chrome). Both are already included.
+2. Go to <https://addons.mozilla.org/developers/> → sign in with a free Mozilla account → **Submit a New Add-on** → **On your own** (self-distribution) → upload that zip. Signing is free and usually takes minutes.
+3. Download the signed `.xpi` Mozilla gives you, save it as `client/public/huntr.xpi`, and deploy.
+4. Firefox users now see **Add to Firefox** on Huntr's Setup page — one click (Firefox asks once to allow installs from your site).
+
+Until the signed file is in place, Setup shows Firefox users how to load it temporarily from `about:debugging`.
+Chrome and Edge users see a notice that Huntr is built for Firefox and some features may not work properly.
+
 ## Deploy (GitHub Pages + Render)
 
 GitHub Pages only serves static files, so the **React client** goes on Pages and the **Express API** goes on Render (free). Supabase stays where it is.

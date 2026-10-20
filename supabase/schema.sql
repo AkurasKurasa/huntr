@@ -14,6 +14,10 @@ create table if not exists public.profiles (
   skills        text[] not null default '{}',
   portfolio_url text,
   resume_path   text,          -- path inside the "resumes" storage bucket
+  headline      text,          -- e.g. "Web developer focused on Webflow and React"
+  summary       text,          -- 1–3 sentences about you
+  highlight     text,          -- one project or result you're proud of
+  answers       jsonb not null default '{}'::jsonb,  -- saved answers to employer questions: { "question": "answer" }
   created_at    timestamptz not null default now(),
   updated_at    timestamptz not null default now()
 );
@@ -154,3 +158,6 @@ create policy "own snapshots read" on storage.objects for select
 drop policy if exists "own snapshots delete" on storage.objects;
 create policy "own snapshots delete" on storage.objects for delete
   using (bucket_id = 'job-snapshots' and (storage.foldername(name))[1] = auth.uid()::text);
+
+-- Make the API see the new columns right away
+notify pgrst, 'reload schema';

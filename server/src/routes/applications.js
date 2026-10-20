@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { draftBody, fillSubject } from '../services/drafter.js';
+import { draftBody, fillSubject, unansweredQuestions } from '../services/drafter.js';
+import { ASK_RE } from '../services/parser.js';
 import { sendGmail } from '../services/gmail.js';
 import { deleteSnapshotImage } from '../services/snapshot.js';
 
@@ -58,7 +59,12 @@ router.post('/:id/redraft', async (req, res, next) => {
     const { data: app, error } = await req.db.from('applications').select('*').eq('id', req.params.id).single();
     if (error) throw error;
     const { data: profile } = await req.db.from('profiles').select('*').eq('id', req.user.id).maybeSingle();
-    const job = { ...app, wants_project: /project/i.test((app.instructions || []).join(' ')), subject_rule: null };
+    const job = {
+      ...app,
+      wants_project: /project/i.test(`${(app.instructions || []).join(' ')} ${app.description || ''}`),
+      asks: (app.instructions || []).filter((s) => ASK_RE.test(s)),
+      subject_rule: null
+    };
     const patch = { tone, body: draftBody(job, profile, tone) };
     if (app.method === 'email' && !app.subject) patch.subject = fillSubject(job, profile);
     const { data, error: upErr } = await req.db.from('applications').update(patch).eq('id', app.id).select().single();
@@ -73,6 +79,9 @@ async function sendOne(req, app, profile) {
   if (app.status !== 'draft') return { id: app.id, ok: true, skipped: 'already sent', application: app };
   if (app.method !== 'email') return { id: app.id, ok: false, needsUser: true, error: 'Apply on the company site, then mark it as submitted' };
   if (!app.apply_email) return { id: app.id, ok: false, error: 'No email address found for this job' };
+  if (unansweredQuestions(app.body).length) {
+    return { id: app.id, ok: false, error: `“${app.title}”: answer the employer's question in the draft first (the part marked “Answer needed”).` };
+  }
   try {
     const messageId = await sendGmail(req.user.id, {
       to: app.apply_email,

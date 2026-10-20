@@ -25,6 +25,7 @@ export default function Nav({ tone = 'light', gmailConnected }) {
         <NavLink to="/apply">Apply</NavLink>
         <NavLink to="/tracker">Tracker</NavLink>
         <NavLink to="/profile">Profile</NavLink>
+        <NavLink to="/extension">Setup</NavLink>
       </div>
       {user && gmailConnected !== undefined && (
         <span className="nav__pill">

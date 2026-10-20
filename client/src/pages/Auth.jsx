@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import Logo from '../components/Logo.jsx';
-import { supabase, signInWithGoogle, appUrl } from '../lib/supabase.js';
+import { supabase, signInWithGoogle, appUrl, googleEnabled } from '../lib/supabase.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
 export default function Auth() {
@@ -14,6 +14,17 @@ export default function Auth() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [info, setInfo] = useState('');
+  const [google, setGoogle] = useState(true);
+  useEffect(() => {
+    googleEnabled().then(setGoogle);
+    // Supabase puts problems with email links (expired, already used) in the address bar.
+    const params = new URLSearchParams(window.location.search + '&' + window.location.hash.replace(/^#\/?[^?&]*[?&]?/, ''));
+    const desc = params.get('error_description');
+    if (desc) {
+      setError(`${desc.replace(/\+/g, ' ')}. Request a new link by signing up again, or log in if you already confirmed.`);
+      window.history.replaceState(null, '', window.location.pathname + '#/auth');
+    }
+  }, []);
 
   if (session) return <Navigate to={from} replace />;
   const login = mode === 'login';
@@ -46,7 +57,7 @@ export default function Auth() {
     }
   }
 
-  async function google() {
+  async function googleSignIn() {
     setError('');
     const { error: err } = await signInWithGoogle(from);
     if (err) setError(err.message);
@@ -90,11 +101,13 @@ export default function Auth() {
             </p>
           </div>
 
-          <button type="button" className="btn btn--google btn--block" onClick={google}>
+          <button type="button" className="btn btn--google btn--block" onClick={googleSignIn} disabled={!google}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7 9 6 9-6" /></svg>
             Continue with Google
           </button>
-          <p className="muted" style={{ margin: '-10px 0 0', fontSize: 13, textAlign: 'center' }}>Also connects Gmail, so Huntr can send applications for you.</p>
+          <p className="muted" style={{ margin: '-10px 0 0', fontSize: 13, textAlign: 'center' }}>
+            {google ? 'Also connects Gmail, so Huntr can send applications for you.' : 'Google sign-in isn’t set up yet — use email and password for now.'}
+          </p>
           <div className="divider">OR</div>
 
           <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>

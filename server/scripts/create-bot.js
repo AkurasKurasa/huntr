@@ -21,6 +21,21 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
   fail('Fill in SUPABASE_URL, SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY in server/.env first.');
 }
 
+// Catch the common SUPABASE_URL mistakes before making any request.
+let host = '';
+try {
+  host = new URL(SUPABASE_URL).hostname;
+} catch {
+  fail(`SUPABASE_URL "${SUPABASE_URL}" is not a valid address. It should look like https://abcdefghijklmnop.supabase.co`);
+}
+if (/YOUR-PROJECT/i.test(SUPABASE_URL)) fail('SUPABASE_URL still has the placeholder YOUR-PROJECT in server/.env — paste your real Project URL.');
+if (host === 'supabase.com' || host.endsWith('.supabase.com')) {
+  fail(`SUPABASE_URL is the dashboard address (${SUPABASE_URL}). Use the API address instead: https://<project-ref>.supabase.co`);
+}
+if (new URL(SUPABASE_URL).pathname.replace(/\/$/, '')) {
+  fail(`SUPABASE_URL should be just https://${host} — remove the "${new URL(SUPABASE_URL).pathname}" part.`);
+}
+
 const email = (process.env.BOT_EMAIL || 'keepalive-bot@huntr-app.example.com').toLowerCase();
 const password = process.env.BOT_PASSWORD || randomBytes(24).toString('base64url');
 const opts = { auth: { persistSession: false, autoRefreshToken: false } };
@@ -80,5 +95,19 @@ Keep the password private. Running this again creates a new password (update the
 `);
   }
 } catch (err) {
+  const cause = err.cause?.code || err.cause?.message || '';
+  if (/fetch failed/i.test(err.message || '') || cause) {
+    const why = {
+      ENOTFOUND: `the address ${host} doesn't exist — check the project ref in SUPABASE_URL for typos`,
+      EAI_AGAIN: 'your computer could not look up the address — check your internet connection',
+      ECONNREFUSED: 'the connection was refused',
+      ETIMEDOUT: 'the connection timed out — check your internet, VPN or firewall',
+      UND_ERR_CONNECT_TIMEOUT: 'the connection timed out — check your internet, VPN or firewall',
+      CERT_HAS_EXPIRED: 'a certificate problem (often antivirus or a school/office network inspecting traffic)',
+      UNABLE_TO_GET_ISSUER_CERT_LOCALLY: 'a certificate problem (often antivirus or a school/office network inspecting traffic)',
+      SELF_SIGNED_CERT_IN_CHAIN: 'a certificate problem (often antivirus or a school/office network inspecting traffic)'
+    }[cause];
+    fail(`Could not reach Supabase at ${SUPABASE_URL}: ${why || cause || 'network error'}. If the project is paused, restore it in the Supabase dashboard first.`);
+  }
   fail(err.message || String(err));
 }
